@@ -896,10 +896,3 @@ def get_orb2atomidx(nao_max, species, Ham_type:str='openmx'):
         orb2atom_idx += [ia]*len(basis_def[z])
     
     return np.array(orb2atom_idx)
-
-if __name__ == '__main__':
-    cos = Constants()
-    print(cos.HARTREEtoINVPS * cos.HARTREEtoEV)
-
-            
-    

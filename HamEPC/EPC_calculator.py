@@ -517,10 +517,8 @@ class EPC_calculator(object):
 
         freq_grid = np.stack(freq_grid, axis=0) * Hamcts.PHONOPYtoHARTREE # shape: (nq, nbranches)
         phon_vecs= np.stack(phon_vecs, axis=0) # shape: (nq, nbranches, nbranches)
+        
         return freq_grid, phon_vecs
-
-    def _get_longitude_phonon_indice(self):
-        return [2, 5]
 
     def _elec_cal(self, k_grid):
         # Calculate the electron wave function
@@ -579,7 +577,8 @@ class EPC_calculator(object):
             # phonon spectrum
             freq = np.abs(freq_grid[iq])
             eigen_vec_phon = phon_vecs[iq].reshape(-1, self.natoms, 3)
-                
+            atomic_phase = np.exp(Hamcts.JTWOPI*np.sum(self.graph_data.pos*q[None,:], axis=-1)) # shape (natoms, )
+            phvec_wap = atomic_phase[None,:,None] * eigen_vec_phon # shape (nbranches, natoms, 3)
             # cal epc
             phase_kpq = np.exp(2j*np.pi*np.sum(self.nbr_shift_of_cell_sc*(k_fix+q)[None,:], axis=-1)) # shape: (ncells,)
             wave_coe1 = wave_k[0, band_ini] # shape: (norbs,)
@@ -589,7 +588,7 @@ class EPC_calculator(object):
             # calculate epc
             for branch_idx in range(int(3*len(self.atomic_mass))):
                 factor = 1.0 / np.sqrt(2.0 * self.atomic_mass * freq[branch_idx]) # shape:(natoms,)
-                tmp2 = np.einsum('ij,mn -> mnij', factor[:,None]*eigen_vec_phon[branch_idx], tmp1)
+                tmp2 = np.einsum('ij,mn -> mnij', factor[:,None]*phvec_wap[branch_idx], tmp1)
                 
                 epc = 0.0
                 for i_m, m in enumerate(self.cell_cut_list): # ncells
@@ -598,7 +597,7 @@ class EPC_calculator(object):
 
                 # Correction of long-range interactions
                 if self.apply_correction and (np.linalg.norm(q) < self.q_cut):
-                    epc_corr = self._dipole_correction(tmp1, k_fix, q, factor, eigen_vec_phon[branch_idx])
+                    epc_corr = self._dipole_correction(tmp1, k_fix, q, factor, phvec_wap[branch_idx])
                 else:
                     epc_corr = 0.0
                 epc_all.append(epc + epc_corr)
@@ -1049,6 +1048,8 @@ class EPC_calculator(object):
             # phonon spectrum
             freq = freq_grid[iq]
             eigen_vec_phon = phon_vecs[iq]
+            atomic_phase = np.exp(Hamcts.JTWOPI*np.sum(self.graph_data.pos*q[None,:], axis=-1)) # shape (natoms, )
+            phvec_wap = atomic_phase[None,:,None] * eigen_vec_phon # shape (nbranches, natoms, 3)
             for ik, k in enumerate(k_grid):
                 eig_k, wave_k = eigen_all[:,ik], eigen_vecs_all[ik]
                 kpq = k+q
@@ -1074,7 +1075,7 @@ class EPC_calculator(object):
                             if freq[branch_idx] < self.phonon_cutoff:
                                 continue
                             factor = 1/np.sqrt(2 * self.atomic_mass * abs(freq[branch_idx])) # shape:(natoms,)
-                            tmp2 = np.einsum('ij,mn -> mnij', factor[:,None]*eigen_vec_phon[branch_idx], tmp1)
+                            tmp2 = np.einsum('ij,mn -> mnij', factor[:,None]*phvec_wap[branch_idx], tmp1)
                             # calculate epc
                             epc = 0.0
                             for i_m, m in enumerate(self.cell_cut_list): # ncells
@@ -1198,6 +1199,8 @@ class EPC_calculator(object):
         for iq, q in enumerate(q_grid[self.rank]):
             # phonon spectrum
             eigen_vec_phon = phon_vecs[iq].reshape(-1, self.natoms, 3)
+            atomic_phase = np.exp(Hamcts.JTWOPI*np.sum(self.graph_data.pos*q[None,:], axis=-1)) # shape (natoms, )
+            phvec_wap = atomic_phase[None,:,None] * eigen_vec_phon # shape (nbranches, natoms, 3)
             epc_strengths_q = np.zeros((self.natoms*3,), dtype=float, order='C')
 
             for ik, k in enumerate(k_grid):
@@ -1213,7 +1216,7 @@ class EPC_calculator(object):
                 # cal epc
                 phase_k = np.exp(Hamcts.JTWOPI*np.sum(self.nbr_shift_of_cell_sc*k[None,:], axis=-1)) # shape: (ncells,)
                 phase_kpq = np.exp(Hamcts.JTWOPI*np.sum(self.nbr_shift_of_cell_sc*(kpq)[None,:], axis=-1)) # shape: (ncells,)
-                eliashberg_spectrum_cal_helper_sparse(freq_grid[iq].copy(), self.atomic_mass.copy(),eigen_vec_phon.copy(), 
+                eliashberg_spectrum_cal_helper_sparse(freq_grid[iq].copy(), self.atomic_mass.copy(),phvec_wap.copy(), 
                                                       self.cell_cut_list, phase_k.copy(),phase_kpq.copy(),grad_mat_dict,
                                                       wave_k.copy(),wave_kpq.copy(),
                                                       bands_indices.copy(),bands_indices.copy(),
@@ -1351,8 +1354,6 @@ class EPC_calculator(object):
         nks = len(k_grid)
         nqs = len(q_grid)
 
-        longitude_branches = self._get_longitude_phonon_indice()
-
         # get cbm plus over_cbm to obtain the energy range we focus on
         efocus_max = ecbm + self.over_cbm
 
@@ -1415,6 +1416,8 @@ class EPC_calculator(object):
                         # phonon spectrum
                         freq = freq_grid[iq]
                         eigen_vec_phon = phon_vecs[iq]
+                        atomic_phase = np.exp(Hamcts.JTWOPI*np.sum(self.graph_data.pos*q[None,:], axis=-1)) # shape (natoms, )
+                        phvec_wap = atomic_phase[None,:,None] * eigen_vec_phon # shape (nbranches, natoms, 3)
                         bose_qvs = bose_weight(freq, self.temperature)
 
                         # calculate the electronic info for k+q
@@ -1432,7 +1435,7 @@ class EPC_calculator(object):
                             for branch_idx in range(nmodes):
                                 if match_table[ibnd, jbnd, branch_idx]:
                                     factor = 1.0 / np.sqrt(2.0 * self.atomic_mass * abs(freq[branch_idx])) # shape:(natoms,)
-                                    tmp2 = np.einsum('ij,mn -> mnij', factor[:,None]*eigen_vec_phon[branch_idx], tmp1)
+                                    tmp2 = np.einsum('ij,mn -> mnij', factor[:,None]*phvec_wap[branch_idx], tmp1)
                                     
                                     epc = 0.0
                                     for i_m, m in enumerate(self.cell_cut_list): # ncells
@@ -1440,8 +1443,8 @@ class EPC_calculator(object):
                                             epc += np.conj(phase_kpq[m])*phase_k[n]*np.einsum('mnij,mnij', tmp2, self.grad_mat[i_m,i_n])
                                     
                                     # Correction of long-range interactions
-                                    if apply_correction_for_this_q and (branch_idx in longitude_branches):
-                                        epc_corr = self._dipole_correction(tmp1, k, q, factor, eigen_vec_phon[branch_idx])
+                                    if apply_correction_for_this_q:
+                                        epc_corr = self._dipole_correction(tmp1, k, q, factor, phvec_wap[branch_idx])
                                     else:
                                         epc_corr = 0.0
                                     epc = epc + epc_corr
@@ -1478,8 +1481,6 @@ class EPC_calculator(object):
         nbands = len(bands_indices)
         nks = len(k_grid)
         nqs = len(q_grid)
-
-        longitude_branches = self._get_longitude_phonon_indice()
 
         # get cbm plus over_cbm to obtain the energy range we focus on
         efocus_max = ecbm + self.over_cbm
@@ -1545,6 +1546,8 @@ class EPC_calculator(object):
                         # phonon spectrum
                         freq = freq_grid[iq]
                         eigen_vec_phon = phon_vecs[iq]
+                        atomic_phase = np.exp(Hamcts.JTWOPI*np.sum(self.graph_data.pos*q[None,:], axis=-1)) # shape (natoms, )
+                        phvec_wap = atomic_phase[None,:,None] * eigen_vec_phon # shape (nbranches, natoms, 3)
                         bose_qvs = bose_weight(freq, self.temperature)
                         kpq = k + q
                         if is_mrta:
@@ -1563,15 +1566,15 @@ class EPC_calculator(object):
                             for branch_idx in range(nmodes):
                                 if match_table[ibnd, jbnd, branch_idx]:
                                     factor = 1.0 / np.sqrt(2.0 * self.atomic_mass * abs(freq[branch_idx])) # shape:(natoms,)
-                                    tmp2 = np.einsum('ij,mn -> mnij', factor[:,None]*eigen_vec_phon[branch_idx], tmp1)
+                                    tmp2 = np.einsum('ij,mn -> mnij', factor[:,None]*phvec_wap[branch_idx], tmp1)
                                     epc = 0.0
                                     for i_m, m in enumerate(self.cell_cut_list): # ncells
                                         for i_n, n in enumerate(self.cell_cut_list): # ncells  
                                             epc += np.conj(phase_kpq[m])*phase_k[n]*np.einsum('mnij,mnij', tmp2, self.grad_mat[i_m,i_n])
                                     
                                     # Correction of long-range interactions
-                                    if apply_correction_for_this_q and branch_idx in longitude_branches:
-                                        epc_corr = self._dipole_correction(tmp1, k, q, factor, eigen_vec_phon[branch_idx])
+                                    if apply_correction_for_this_q:
+                                        epc_corr = self._dipole_correction(tmp1, k, q, factor, phvec_wap[branch_idx])
                                     else:
                                         epc_corr = 0.0
                                     epc = epc + epc_corr
@@ -1616,8 +1619,6 @@ class EPC_calculator(object):
         nks = len(k_grid)
         nqs = len(q_grid)
 
-        longitude_branches = self._get_longitude_phonon_indice()
-
         # get cbm plus over_cbm to obtain the energy range we focus on
         efocus_max = ecbm + self.over_cbm
 
@@ -1660,6 +1661,8 @@ class EPC_calculator(object):
                     # phonon spectrum
                     freq = freq_grid[iq]
                     eigen_vec_phon = phon_vecs[iq]
+                    atomic_phase = np.exp(Hamcts.JTWOPI*np.sum(self.graph_data.pos*q[None,:], axis=-1)) # shape (natoms, )
+                    phvec_wap = atomic_phase[None,:,None] * eigen_vec_phon # shape (nbranches, natoms, 3)
                     bose_qvs = bose_weight(freq, self.temperature)
 
                     # calculate the electronic info for k+q
@@ -1677,7 +1680,7 @@ class EPC_calculator(object):
                         for branch_idx in range(nmodes):
                             if match_table[ibnd, jbnd, branch_idx]:
                                 factor = 1.0 / np.sqrt(2.0 * self.atomic_mass * abs(freq_grid[iq, branch_idx])) # shape:(natoms,)
-                                tmp2 = np.einsum('ij,mn -> mnij', factor[:,None]*eigen_vec_phon[branch_idx], tmp1)
+                                tmp2 = np.einsum('ij,mn -> mnij', factor[:,None]*phvec_wap[branch_idx], tmp1)
                                 
                                 epc = 0.0
                                 for i_m, m in enumerate(self.cell_cut_list): # ncells
@@ -1685,8 +1688,8 @@ class EPC_calculator(object):
                                         epc += np.conj(phase_kpq[m])*phase_k[n]*np.einsum('mnij,mnij', tmp2, self.grad_mat[i_m,i_n])
                                 
                                 # Correction of long-range interactions
-                                if apply_correction_for_this_q and (branch_idx in longitude_branches):
-                                    epc_corr = self._dipole_correction(tmp1, k, q, factor, eigen_vec_phon[branch_idx])
+                                if apply_correction_for_this_q:
+                                    epc_corr = self._dipole_correction(tmp1, k, q, factor, phvec_wap[branch_idx])
                                 else:
                                     epc_corr = 0.0
                                 epc = epc + epc_corr
@@ -1724,8 +1727,6 @@ class EPC_calculator(object):
         nks = len(k_grid)
         nqs = len(q_grid)
 
-        longitude_branches = self._get_longitude_phonon_indice()
-
         # get cbm plus over_cbm to obtain the energy range we focus on
         efocus_max = ecbm + self.over_cbm
 
@@ -1742,9 +1743,8 @@ class EPC_calculator(object):
         if q_grid[self.rank].size>0:
             # calculate the phonon spectrum in parallel
             freq_grid, phon_vecs = self._phonon_cal(q_grid[self.rank])
-            freq_grid = freq_grid[:, longitude_branches]
             nqs_local = len(freq_grid)
-            phon_vecs = phon_vecs.reshape(nqs_local, nmodes, self.natoms, 3)[:,longitude_branches,:,:]
+            phon_vecs = phon_vecs.reshape(nqs_local, nmodes, self.natoms, 3)
             weights_q_local = weights_q[self.rank]
             del weights_q
             # change fractional coordinates to cartesian coordinates
@@ -1787,6 +1787,8 @@ class EPC_calculator(object):
                             # phonon spectrum
                             freq = freq_grid[iq]
                             eigen_vec_phon = phon_vecs[iq]
+                            atomic_phase = np.exp(Hamcts.JTWOPI*np.sum(self.graph_data.pos*q[None,:], axis=-1)) # shape (natoms, )
+                            phvec_wap = atomic_phase[None,:,None] * eigen_vec_phon # shape (nbranches, natoms, 3)
                             bose_qvs = bose_weight(freq, self.temperature)
                             # calculate the electronic info for k+q
                             kpq = k + q
@@ -1798,10 +1800,10 @@ class EPC_calculator(object):
                             # cal epc
                             for jbnd in range(nbands):
                                 tmp1 = np.einsum('m,n -> mn', np.conj(wave_kpq[jbnd]), wave_k[ibnd])
-                                for imode in range(len(longitude_branches)):
+                                for imode in range(nmodes):
                                     factor = 1.0 / np.sqrt(2.0 * self.atomic_mass * abs(freq[imode])) # shape:(natoms,)
                                     if match_table[ibnd, jbnd, imode]:
-                                        epc = self._dipole_correction(tmp1, k, q, factor, eigen_vec_phon[imode])
+                                        epc = self._dipole_correction(tmp1, k, q, factor, phvec_wap[imode])
                                         delta_f1 = w0gauss((eig_k[ibnd] - eig_kpq[jbnd] + freq[imode]) * self.inv_smearq) * self.inv_smearq
                                         delta_f2 = w0gauss((eig_k[ibnd] - eig_kpq[jbnd] - freq[imode]) * self.inv_smearq) * self.inv_smearq
                                         g2_tmp = np.abs(epc) * np.abs(epc)
@@ -1835,14 +1837,6 @@ class EPC_calculator(object):
         nbands = len(band_indice)
         nks = len(k_grid)
         nqs = len(q_grid)
-
-        longitude_branches = self._get_longitude_phonon_indice()
-        all_branches = np.arange(nmodes)
-        transverse_branches = []
-        for imode in all_branches:
-            if imode not in longitude_branches:
-                transverse_branches.append(imode)
-        transverse_branches = np.array(transverse_branches, dtype=int)
 
         # get cbm plus over_cbm to obtain the energy range we focus on
         efocus_max = ecbm + self.over_cbm
@@ -1904,6 +1898,8 @@ class EPC_calculator(object):
                         # phonon spectrum
                         freq = freq_grid[iq]
                         eigen_vec_phon = phon_vecs[iq]
+                        atomic_phase = np.exp(Hamcts.JTWOPI*np.sum(self.graph_data.pos*q[None,:], axis=-1)) # shape (natoms, )
+                        phvec_wap = atomic_phase[None,:,None] * eigen_vec_phon # shape (nbranches, natoms, 3)
                         bose_qvs = bose_weight(freq, self.temperature)
                         # calculate the electronic info for k+q
                         kpq = k + q
@@ -1916,33 +1912,17 @@ class EPC_calculator(object):
                         # cal epc
                         for jbnd in range(nbands):
                             tmp1 = np.einsum('m,n -> mn', np.conj(wave_kpq[jbnd]), wave_k[ibnd])
-                            # calculate epc for nonLO
-                            for imode in transverse_branches:
+                            for imode in range(nmodes):
                                 if match_table[ibnd, jbnd, imode]:
                                     factor = 1.0 / np.sqrt(2.0 * self.atomic_mass * abs(freq[imode])) # shape:(natoms,)
-                                    tmp2 = np.einsum('ij,mn -> mnij', factor[:,None]*eigen_vec_phon[imode], tmp1)
-                                    epc = 0.0
-                                    for i_m, m in enumerate(self.cell_cut_list): # ncells
-                                        for i_n, n in enumerate(self.cell_cut_list): # ncells  
-                                            epc += np.conj(phase_kpq[m])*phase_k[n]*np.einsum('mnij,mnij', tmp2, self.grad_mat[i_m,i_n])
-                                    g2_tmp = np.abs(epc) * np.abs(epc)
-                                    delta_f1 = w0gauss((eig_k[ibnd] - eig_kpq[jbnd] + freq[imode]) * self.inv_smearq) * self.inv_smearq
-                                    delta_f2 = w0gauss((eig_k[ibnd] - eig_kpq[jbnd] - freq[imode]) * self.inv_smearq) * self.inv_smearq
-                                    rate_all[ibnd, ik_all] += weights_q_local[iq] * g2_tmp * \
-                                                              ((bose_qvs[imode] + fermi_kpqs[jbnd]) * delta_f1 + \
-                                                               (bose_qvs[imode] + 1.0 - fermi_kpqs[jbnd]) * delta_f2)
-                            # calculate epc for LO
-                            for imode in longitude_branches:
-                                if match_table[ibnd, jbnd, imode]:
-                                    factor = 1.0 / np.sqrt(2.0 * self.atomic_mass * abs(freq[imode])) # shape:(natoms,)
-                                    tmp2 = np.einsum('ij,mn -> mnij', factor[:,None]*eigen_vec_phon[imode], tmp1)
+                                    tmp2 = np.einsum('ij,mn -> mnij', factor[:,None]*phvec_wap[imode], tmp1)
                                     epc = 0.0
                                     for i_m, m in enumerate(self.cell_cut_list): # ncells
                                         for i_n, n in enumerate(self.cell_cut_list): # ncells  
                                             epc += np.conj(phase_kpq[m])*phase_k[n]*np.einsum('mnij,mnij', tmp2, self.grad_mat[i_m,i_n])
                                     # Correction of long-range interactions
                                     if apply_correction_for_this_q:
-                                        epc_corr = self._dipole_correction(tmp1, k, q, factor, eigen_vec_phon[imode])
+                                        epc_corr = self._dipole_correction(tmp1, k, q, factor, phvec_wap[imode])
                                         epc = epc + epc_corr
                                         g2_tmp = np.abs(epc) * np.abs(epc) - np.abs(epc_corr) * np.abs(epc_corr)
                                     else:
@@ -2295,6 +2275,8 @@ class EPC_calculator(object):
                 freqs, phon_vecs = self._phonon_cal(q)
                 freqs = freqs[0]
                 phon_vecs = phon_vecs[0].reshape(nmodes, self.natoms, 3)
+                atomic_phase = np.exp(Hamcts.JTWOPI*np.sum(self.graph_data.pos*q[None,:], axis=-1)) # shape (natoms, )
+                phvec_wap = atomic_phase[None,:,None] * phon_vecs # shape (nbranches, natoms, 3)
                 kpq = k + q
                 _, wave_kpq = self._elec_cal(kpq)
                 wave_kpq = wave_kpq[0, bands_indices, :]
@@ -2304,7 +2286,7 @@ class EPC_calculator(object):
                         tmp1 = np.einsum('m,n -> mn', np.conj(wave_kpq[jbnd]), wave_k[ibnd])
                         for imode in range(nmodes):
                             factor = 1.0 / np.sqrt(2.0 * self.atomic_mass * abs(freqs[imode])) # shape:(natoms,)
-                            tmp2 = np.einsum('ij,mn -> mnij', factor[:,None]*phon_vecs[imode], tmp1)
+                            tmp2 = np.einsum('ij,mn -> mnij', factor[:,None]*phvec_wap[imode], tmp1)
                             epc = 0.0
                             for i_m, m in enumerate(self.cell_cut_list): # ncells
                                 for i_n, n in enumerate(self.cell_cut_list): # ncells  
