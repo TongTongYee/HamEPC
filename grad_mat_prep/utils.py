@@ -181,7 +181,8 @@ spin_set = {'H':[0.5, 0.5],
             'V':[6.5, 6.5],
             'Sb':[7.5, 7.5],
             'Ge':[2.0,2.0],
-            'Y':[5.5,5.5]
+            'Y':[5.5,5.5],
+            'Fe':[9.0,7.0]
             }
 
 # Warning: this dict is not complete!!!
@@ -219,7 +220,8 @@ PAO_dict = {'H':'H6.0-s2p1',
             'V': 'V6.0-s3p2d1',
             'Sb': 'Sb7.0-s3p2d2',
             'Ge': 'Ge7.0-s3p2d2',
-            'Y':'Y10.0-s3p2d2'
+            'Y':'Y10.0-s3p2d2',
+            'Fe':'Fe5.5H-s3p2d1'
             }
 
 # Warning: this dict is not complete!!!
@@ -257,7 +259,8 @@ PBE_dict = {'H':'H_PBE19',
             'V':'V_PBE19',
             'Sb':'Sb_PBE19',
             'Ge':'Ge_PBE19',
-            'Y':'Y_PBE19'}
+            'Y':'Y_PBE19',
+            'Fe':'Fe_PBE19H'}
 
 basis_def_19 = {
              1:np.array([0,1,3,4,5], dtype=int), # H
@@ -281,6 +284,7 @@ basis_def_19 = {
              19:np.array([0,1,2,3,4,5,6,7,8,9,10,11,12,13], dtype=int), # K
              20:np.array([0,1,2,3,4,5,6,7,8,9,10,11,12,13], dtype=int), # Ca 
              42:np.array([0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18], dtype=int), # Mo  
+             52:np.array([0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18], dtype=int), # Te
              83:np.array([0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18], dtype=int), # Bi  
              34:np.array([0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18], dtype=int), # Se 
              24:np.array([0,1,2,3,4,5,6,7,8,9,10,11,12,13], dtype=int), # Cr 

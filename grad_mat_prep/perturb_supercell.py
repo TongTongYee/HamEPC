@@ -17,11 +17,11 @@ from phonopy.structure.atoms import atom_data, symbol_map
 import copy
 
 ######################## Input parameters begin #######################
-unitcell_dir = "./CVS.vasp" # The path of poscar or cif files
+unitcell_dir = "./POSCAR.vasp" # The path of poscar or cif files
 supercell_path = './perturb/' # openmx file directory to save
 Nrange1, Nrange2, Nrange3 = 1, 1, 1
 delta_r = 0.01
-system_name = 'CVS'
+system_name = 'EPC'
 mat_info_path = './perturb/'
 use_central_difference = False
 ######################## Input parameters end #########################
@@ -33,7 +33,7 @@ openmx_basic_commad = f"""#
 
 System.CurrrentDirectory         ./    # default=./
 System.Name                      {system_name}
-DATA.PATH                       ../DFT_DATA19
+DATA.PATH   /home/rudgmlckd/openmx3.9/openmx3.9/DFT_DATA19
 level.of.stdout                   1    # default=1 (1-3)
 level.of.fileout                  1    # default=1 (0-2)
 HS.fileout                   on       # on|off, default=off
@@ -44,9 +44,10 @@ HS.fileout                   on       # on|off, default=off
 
 scf.XcType                  GGA-PBE    # LDA|LSDA-CA|LSDA-PW|GGA-PBE
 scf.partialCoreCorrection   on 
-scf.SpinPolarization        off        # On|Off|NC
+scf.SpinPolarization        NC        # On|Off|NC
+scf.SpinOrbit.Coupling      on         # on|off
 scf.ElectronicTemperature  300.0       # default=300 (K)
-scf.energycutoff           200.0       # default=150 (Ry)
+scf.energycutoff           150.0       # default=150 (Ry)
 scf.maxIter                 300         # default=40
 scf.EigenvalueSolver       Band    # DC|GDC|Cluster|Band
 scf.Kgrid                  6 6 6       # means 4x4x4
@@ -57,7 +58,7 @@ scf.Max.Mixing.Weight      0.3000      # default=0.40
 scf.Mixing.History           50
 scf.Mixing.StartPulay        30
 scf.Mixing.EveryPulay        1
-scf.criterion             1.0e-14      # default=1.0e-6 (Hartree)
+scf.criterion             1.0e-6      # default=1.0e-6 (Hartree)
 
 
 #
@@ -73,7 +74,7 @@ MD.TimeStep                1.0         # default=0.5 (fs)
 MD.Opt.criterion          1.0e-4       # default=1.0e-4 (Hartree/bohr)
 
 
-\n"""
+"""
 
 ################################ OPENMX calculation parameters Set end #######################
 

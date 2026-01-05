@@ -6,6 +6,7 @@ import collections
 from utils import (read_openmx_dat, atoms_dict_to_openmxfile, au2ang, save_dict_by_numpy,
                     spin_set, PAO_dict, PBE_dict, basis_def_14, basis_def_19, basis_def_26,
                     build_sparse_matrix)
+from utils_SOC import  build_sparse_matrix_soc
 import collections
 from phonopy.interface.vasp import read_vasp
 from phonopy.structure.atoms import atom_data, symbol_map
@@ -19,17 +20,18 @@ from phonopy.structure.atoms import atom_data, symbol_map
 ######################## IMPORTANT #######################
 
 ######################## Input parameters begin #######################
-system_name = 'CVS'
-openmx_executable_path = "./"
+system_name = 'EPC'
+openmx_executable_path = "/home/rudgmlckd/work/Ham/HamEPC/grad_mat_prep/"
 work_path = "./"
-graph_data_dir = "./perturb/graph_data.npz"
+graph_data_dir = "./perturb/save/graph_data.npz"
 mat_info_sc_dir = "./perturb/mat_info_rc.npy"
-unitcell_dir = "./CVS.vasp"
+unitcell_dir = "./POSCAR.vasp"
 H_pred_result_dir = "./perturb/prediction_hamiltonian.npy"
 delta_r = 0.01 # ang
 use_central_difference = False
-nao_max = 19
-gather_H_pred = True    # If False, the code will use H_all.npy instead of H_all_pred.npy
+nao_max = 26
+soc_switch = True  # SOC 옵션 추가
+gather_H_pred = False    # If False, the code will use H_all.npy instead of H_all_pred.npy
 read_dSon = False   # If true, read each dSon_xxx.npy from {work_path}/dSon/xxx/
 dSon_delta_r = 0.001
 ######################## Input parameters end #########################
@@ -41,7 +43,7 @@ openmx_basic_command = f"""#
 
 System.CurrrentDirectory         ./    # default=./
 System.Name                      {system_name}
-DATA.PATH                      ../DFT_DATA19
+DATA.PATH                      /home/rudgmlckd/work/Ham/DFT_DATA19
 level.of.stdout                   1    # default=1 (1-3)
 level.of.fileout                  1    # default=1 (0-2)
 HS.fileout                   on       # on|off, default=off
@@ -52,7 +54,8 @@ HS.fileout                   on       # on|off, default=off
 
 scf.XcType                  GGA-PBE    # LDA|LSDA-CA|LSDA-PW|GGA-PBE
 scf.partialCoreCorrection   on 
-scf.SpinPolarization        off        # On|Off|NC
+scf.SpinPolarization        NC        # On|Off|NC
+scf.SpinOrbit.Coupling      on         # on|off
 scf.ElectronicTemperature  300.0       # default=300 (K)
 scf.energycutoff           200.0       # default=150 (Ry)
 scf.maxIter                 300         # default=40
@@ -160,7 +163,17 @@ for k in basis_def.keys():
     basis_definition[k][basis_def[k]] = 1
 
 orb_mask = basis_definition[species_uc].reshape(-1) # shape: [natoms_uc*nao_max] 
-orb_mask = orb_mask[:,None] * orb_mask[None,:]   # shape: [natoms_uc*nao_max, natoms_uc*nao_max]
+mask_uc = basis_definition[species_uc] # (natoms, 19)
+if soc_switch:
+    # 각 원자 행에 대해 Up 19개 옆에 Down 19개 마스크를 붙임 -> (natoms, 38)
+    # 이후 순서대로 펼침 -> [At0_U, At0_D, At1_U, At1_D, ...]
+    orb_mask = np.hstack([mask_uc, mask_uc]).flatten()
+else:
+    # 비-SOC인 경우 기존과 동일하게 원자별 오비탈 마스크만 사용
+    orb_mask = mask_uc.flatten()
+
+orb_mask = orb_mask[:,None] * orb_mask[None,:]   # shape: [natoms_uc*eff_nao, natoms_uc*eff_nao]
+eff_nao = nao_max * 2 if soc_switch else nao_max # 실제 오비탈 차원
 
 graph_data = np.load(graph_data_dir, allow_pickle=True)
 graph_data = graph_data['graph'].item()
@@ -188,10 +201,24 @@ S_all = []
 H_all_pred = []
 for idx, data in enumerate(graph_dataset):
     # build crystal structure
-    Son = data.Son.numpy().reshape(-1, nao_max, nao_max)
-    Soff = data.Soff.numpy().reshape(-1, nao_max, nao_max)
-    Hon = data.Hon.numpy().reshape(-1, nao_max, nao_max)
-    Hoff = data.Hoff.numpy().reshape(-1, nao_max, nao_max)
+    Son_raw = data.Son.numpy().reshape(-1, nao_max, nao_max)   
+    Soff_raw = data.Soff.numpy().reshape(-1, nao_max, nao_max) 
+
+    # 2. S 행렬을 SOC 차원(38x38)으로 확장 (스핀 대각 블록에 복사)
+    Son = np.zeros((Son_raw.shape[0], eff_nao, eff_nao), dtype=Son_raw.dtype)
+    Son[:, :nao_max, :nao_max] = Son_raw
+    Son[:, nao_max:, nao_max:] = Son_raw
+    
+    Soff = np.zeros((Soff_raw.shape[0], eff_nao, eff_nao), dtype=Soff_raw.dtype)
+    Soff[:, :nao_max, :nao_max] = Soff_raw
+    Soff[:, nao_max:, nao_max:] = Soff_raw
+    
+    Hon = data.Hon.numpy().reshape(-1, eff_nao, eff_nao)
+    Hoff = data.Hoff.numpy().reshape(-1, eff_nao, eff_nao)
+    # SOC를 위한 허수 성분 로드
+    iHon = data.iHon.numpy().reshape(-1, eff_nao, eff_nao) if soc_switch else np.zeros_like(Hon)
+    iHoff = data.iHoff.numpy().reshape(-1, eff_nao, eff_nao) if soc_switch else np.zeros_like(Hoff)
+    
     latt = data.cell.numpy().reshape(3,3)
     cell_shift = data.cell_shift.numpy()
     nbr_shift = data.nbr_shift.numpy()
@@ -199,22 +226,33 @@ for idx, data in enumerate(graph_dataset):
     species = data.z.numpy()
     natoms_sc = len(species)
     
-    # shape: (Ncells, natoms_sc, nao_max, natoms_sc, nao_max)
-    H_cell, cell_shift_array, cell_index, cell_index_map, inv_cell_index = build_sparse_matrix(species, cell_shift, nao_max, 
-                                                                            Hon, Hoff, edge_index,return_raw_mat=True)
-    S_cell, _, _, _, _ = build_sparse_matrix(species, cell_shift, nao_max, Son, Soff, edge_index, return_raw_mat=True)
+    # SOC 여부에 따른 빌더 선택
+    if soc_switch:
+        H_cell, cell_shift_array, cell_index, cell_index_map, inv_cell_index = build_sparse_matrix_soc(species, cell_shift, nao_max, 
+                                                                            Hon, Hoff, iHon, iHoff, edge_index, return_raw_mat=True)
+        # S 행렬은 일반적으로 허수부가 0인 빌더로 처리
+        S_cell, _, _, _, _ = build_sparse_matrix_soc(
+                species, cell_shift, nao_max, Son, Soff, 
+                np.zeros_like(Son), np.zeros_like(Soff), # S는 허수부가 없으므로 0 처리
+                edge_index, return_raw_mat=True
+            )
+    else:
+        H_cell, cell_shift_array, cell_index, cell_index_map, inv_cell_index = build_sparse_matrix(species, cell_shift, nao_max, 
+                                                                                Hon, Hoff, edge_index, return_raw_mat=True)
+        S_cell, _, _, _, _ = build_sparse_matrix(species, cell_shift, nao_max, Son, Soff, edge_index, return_raw_mat=True)
 
     if use_H_gamma:
-        H_000 = np.einsum('nijkl->ijkl', H_cell) # shape: (natoms_sc, nao_max, natoms_sc, nao_max)
-        S_000 = np.einsum('nijkl->ijkl', S_cell) # shape: (natoms_sc, nao_max, natoms_sc, nao_max)
+        H_000 = np.einsum('nijkl->ijkl', H_cell) # shape: (natoms_sc, eff_nao, natoms_sc, eff_nao)
+        S_000 = np.einsum('nijkl->ijkl', S_cell) # shape: (natoms_sc, eff_nao, natoms_sc, eff_nao)
     else:
-        H_000 = H_cell[cell_index_map[(0,0,0)]] # shape: (natoms_sc, nao_max, natoms_sc, nao_max)
-        S_000 = S_cell[cell_index_map[(0,0,0)]] # shape: (natoms_sc, nao_max, natoms_sc, nao_max)
+        H_000 = H_cell[cell_index_map[(0,0,0)]] # shape: (natoms_sc, eff_nao, natoms_sc, eff_nao)
+        S_000 = S_cell[cell_index_map[(0,0,0)]] # shape: (natoms_sc, eff_nao, natoms_sc, eff_nao)
     
     del H_cell, S_cell
     
-    H_reduced = np.zeros((ncells_reduced, ncells_reduced, natoms_uc, nao_max, natoms_uc, nao_max))
-    S_reduced = np.zeros((ncells_reduced, ncells_reduced, natoms_uc, nao_max, natoms_uc, nao_max))
+    # 복소수 계산을 위해 dtype=complex 지정
+    H_reduced = np.zeros((ncells_reduced, ncells_reduced, natoms_uc, eff_nao, natoms_uc, eff_nao), dtype=complex)
+    S_reduced = np.zeros((ncells_reduced, ncells_reduced, natoms_uc, eff_nao, natoms_uc, eff_nao), dtype=complex)
     
     for i, Ci in enumerate(cell_shift_of_each_atom_in_sc): # ncells
         ia = s2u_list_reduced[i]
@@ -225,18 +263,18 @@ for idx, data in enumerate(graph_dataset):
             H_reduced[Ci,Cj,ia,:,ja,:] = H_000[i,:,j,:]
             S_reduced[Ci,Cj,ia,:,ja,:] = S_000[i,:,j,:]
     
-    H_reduced = H_reduced.reshape(ncells_reduced, ncells_reduced, natoms_uc*nao_max, natoms_uc*nao_max)
-    H_reduced = H_reduced[:, :, orb_mask > 0] # shape: (ncells, ncells, norbs*norbs)
+    H_reduced = H_reduced.reshape(ncells_reduced, ncells_reduced, -1)
+    H_reduced = H_reduced[:, :, orb_mask.reshape(-1) > 0] 
     norbs = int(math.sqrt(H_reduced.size/(ncells_reduced*ncells_reduced)))
     H_reduced = H_reduced.reshape(ncells_reduced, ncells_reduced, norbs, norbs)
     
-    S_reduced = S_reduced.reshape(ncells_reduced, ncells_reduced, natoms_uc*nao_max, natoms_uc*nao_max)
-    S_reduced = S_reduced[:, :, orb_mask > 0] # shape: (ncells, ncells, norbs, norbs)
+    S_reduced = S_reduced.reshape(ncells_reduced, ncells_reduced, -1)
+    S_reduced = S_reduced[:, :, orb_mask.reshape(-1) > 0]
     S_reduced = S_reduced.reshape(ncells_reduced, ncells_reduced, norbs, norbs)
     
     H_all.append(H_reduced)
     S_all.append(S_reduced)
-    
+
     if gather_H_pred:
         Hon_pred = Hon_all[idx].reshape(-1, nao_max, nao_max)
         Hoff_pred = Hoff_all[idx].reshape(-1, nao_max, nao_max)
@@ -410,7 +448,15 @@ S_den_inv = np.linalg.inv(S_den)
 # Initialize dSbar
 repeats = []
 for ia in range(natoms_uc):
-    repeats.append(len(basis_def[atomic_nums[ia]]))
+    # 원본 기저 함수 개수 (예: Mo의 경우 19)
+    n_basis = len(basis_def[atomic_nums[ia]])
+    
+    # SOC 옵션이 활성화된 경우, 스핀 업/다운을 위해 2배로 늘려줌
+    if soc_switch:
+        repeats.append(n_basis * 2)
+    else:
+        repeats.append(n_basis)
+
 orb2atom_idx = np.repeat(np.arange(natoms_uc), repeats=repeats, axis=0)
 dSbar = np.zeros_like(nabla_S) # shape: (ncells_reduced, ncells_reduced, norbs, norbs, natoms, 3)
 center_cell_idx = cell_index_map_reduced[(0,0,0)]
@@ -418,10 +464,23 @@ m = np.arange(norbs)
 dSbar[center_cell_idx,:,m,:,orb2atom_idx[m],:] = -nabla_S[center_cell_idx,:,m,:,orb2atom_idx[m],:]
 start = 0
 for ia in range(natoms_uc):
-    dSbar[center_cell_idx,center_cell_idx,start:start+repeats[ia],start:start+repeats[ia],ia,0] = dSon[atomic_nums[ia]][(0,0,0)][1] # x
-    dSbar[center_cell_idx,center_cell_idx,start:start+repeats[ia],start:start+repeats[ia],ia,1] = dSon[atomic_nums[ia]][(0,0,0)][2] # y
-    dSbar[center_cell_idx,center_cell_idx,start:start+repeats[ia],start:start+repeats[ia],ia,2] = dSon[atomic_nums[ia]][(0,0,0)][3] # z
-    start += repeats[ia]
+    # dSon 데이터는 보통 (4, 19, 19) 크기 (0:S, 1:dx, 2:dy, 3:dz)
+    dSon_entry = dSon[atomic_nums[ia]][(0,0,0)]
+    n_orig = len(basis_def[atomic_nums[ia]]) # 보통 19
+    
+    for idir in range(3): # x, y, z 방향
+        val = dSon_entry[idir + 1] # 미분 값 (19x19 행렬)
+        
+        if soc_switch:
+            # 19x19 데이터를 38x38의 스핀 업/다운 대각 블록에 각각 복사
+            # Up-Up 블록
+            dSbar[center_cell_idx, center_cell_idx, start:start+n_orig, start:start+n_orig, ia, idir] = val
+            # Down-Down 블록
+            dSbar[center_cell_idx, center_cell_idx, start+n_orig:start+2*n_orig, start+n_orig:start+2*n_orig, ia, idir] = val
+        else:
+            dSbar[center_cell_idx, center_cell_idx, start:start+n_orig, start:start+n_orig, ia, idir] = val
+            
+    start += repeats[ia] # 여기서 repeats[ia]는 이미 38(SOC) 또는 19(Non-SOC)
 dSbar = np.swapaxes(dSbar, axis1=1, axis2=2).reshape(ncells*norbs, ncells*norbs, natoms_uc, 3)
 tmp1 = np.dot(S_den_inv, H_den)
 sum1 = []
@@ -429,8 +488,12 @@ for ia in range(natoms_uc):
     for dir in range(3):
         sum1.append(np.dot(dSbar[:,:,ia, dir], tmp1))
 sum1 = np.stack(sum1, axis=-1).reshape(ncells*norbs, ncells*norbs, natoms_uc, 3)
-sum2 = np.swapaxes(sum1, axis1=0, axis2=1)
-grad_mat = (sum1+sum2).reshape(ncells, norbs, ncells, norbs, natoms_uc, 3)
+if soc_switch:
+    sum2 = np.swapaxes(sum1, axis1=0, axis2=1).conj() 
+else:
+    sum2 = np.swapaxes(sum1, axis1=0, axis2=1)
+    
+grad_mat = (sum1 + sum2).reshape(ncells, norbs, ncells, norbs, natoms_uc, 3)
 grad_mat = np.swapaxes(grad_mat, axis1=1, axis2=2) # shape: (ncells, ncells, norbs, norbs, natoms_uc, 3)
 grad_mat += nabla_H
 
